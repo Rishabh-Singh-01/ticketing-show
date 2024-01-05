@@ -1,0 +1,49 @@
+name: deploy-manifests
+
+on:
+  push:
+    branches: 
+      - master
+    paths:
+      - 'infra/k8s-prod/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ secrets.GOOGLE_PROJECT }}
+      ARTIFACT_REGISTRY_NAME: ${{ secrets.ARTIFACT_REGISTRY_NAME }}
+      KUBERNETES_CLUSTER_NAME: ${{ secrets.KUBERNETES_CLUSTER_NAME }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Install the google cloud cli
+        uses: google-github-actions/setup-gcloud@v0
+        with:
+          service_account_key: ${{ secrets.SERVICE_ACCOUNT_KEY }}
+          project_id: ${{ env.PROJECT_ID }}
+          install_components: 'gke-gcloud-auth-plugin'
+          export_default_credentials: true
+    
+      - name: Replace the variables in k8s manifests
+        run: |
+          sed -i "s/PROJECT_ID/$PROJECT_ID/g" infra/k8s-prod/auth-depl.yaml
+          sed -i "s/ARTIFACT_REGISTRY_NAME/$ARTIFACT_REGISTRY_NAME/g" infra/k8s-prod/auth-depl.yaml
+          sed -i "s/PROJECT_ID/$PROJECT_ID/g" infra/k8s-prod/client-depl.yaml
+          sed -i "s/ARTIFACT_REGISTRY_NAME/$ARTIFACT_REGISTRY_NAME/g" infra/k8s-prod/client-depl.yaml
+          sed -i "s/PROJECT_ID/$PROJECT_ID/g" infra/k8s-prod/expiration-depl.yaml
+          sed -i "s/ARTIFACT_REGISTRY_NAME/$ARTIFACT_REGISTRY_NAME/g" infra/k8s-prod/expiration-depl.yaml
+          sed -i "s/PROJECT_ID/$PROJECT_ID/g" infra/k8s-prod/orders-depl.yaml
+          sed -i "s/ARTIFACT_REGISTRY_NAME/$ARTIFACT_REGISTRY_NAME/g" infra/k8s-prod/orders-depl.yaml
+          sed -i "s/PROJECT_ID/$PROJECT_ID/g" infra/k8s-prod/payments-depl.yaml
+          sed -i "s/ARTIFACT_REGISTRY_NAME/$ARTIFACT_REGISTRY_NAME/g" infra/k8s-prod/payments-depl.yaml
+          sed -i "s/PROJECT_ID/$PROJECT_ID/g" infra/k8s-prod/tickets-depl.yaml
+          sed -i "s/ARTIFACT_REGISTRY_NAME/$ARTIFACT_REGISTRY_NAME/g" infra/k8s-prod/tickets-depl.yaml
+    
+      - name: Apply manifests to gke
+        run: |
+          gcloud --quiet config set project $PROJECT_ID
+          gcloud --quiet config set compute/zone asia-south2
+          gcloud container clusters get-credentials $KUBERNETES_CLUSTER_NAME --zone=asia-south2 --project=$PROJECT_ID --quiet
+          kubectl apply -f infra/k8s-prod

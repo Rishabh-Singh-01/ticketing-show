@@ -1,0 +1,56 @@
+---
+name: deploy-orders
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'orders/**'
+jobs:
+  build-push-gcr:
+    name: Build and Push to GCP
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: orders
+      PROJECT_ID: ${{ secrets.GOOGLE_PROJECT }}
+      ARTIFACT_REGISTRY_NAME: ${{ secrets.ARTIFACT_REGISTRY_NAME }}
+      KUBERNETES_CLUSTER_NAME: ${{ secrets.KUBERNETES_CLUSTER_NAME }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Compiles and build
+      run: cd orders && npm install && npm run build
+
+    - name: Build Docker Image
+      run: cd orders && docker build -f Prod.Dockerfile -t $IMAGE_NAME:latest .
+
+    - name: Install the google cloud cli
+      uses: google-github-actions/setup-gcloud@v0
+      with:
+        service_account_key: ${{ secrets.SERVICE_ACCOUNT_KEY }}
+        project_id: ${{ env.PROJECT_ID }}
+        install_components: 'gke-gcloud-auth-plugin'
+        export_default_credentials: true
+
+    - name: Configure Docker Client
+      run: |-
+        gcloud auth configure-docker --quiet
+        gcloud auth configure-docker asia-south2-docker.pkg.dev --quiet
+
+    - name: Push Docker Image to Artifact Registry
+      env:
+        GIT_TAG: ${{ vars.CURRENT_GIT_TAG_ORDERS }}
+      run: |-
+        docker tag $IMAGE_NAME:latest asia-south2-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_NAME/$IMAGE_NAME:latest
+        docker tag $IMAGE_NAME:latest asia-south2-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_NAME/$IMAGE_NAME:$GIT_TAG
+        docker push asia-south2-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_NAME/$IMAGE_NAME:latest
+        docker push asia-south2-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_NAME/$IMAGE_NAME:$GIT_TAG
+
+    - name: Restarting the deployment
+      run: |
+        gcloud --quiet config set project $PROJECT_ID
+        gcloud --quiet config set compute/zone asia-south2
+        gcloud container clusters get-credentials $KUBERNETES_CLUSTER_NAME --zone=asia-south2 --project=$PROJECT_ID --quiet
+        kubectl rollout restart deployment orders-depl
